@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<title>Bike Inclinometer v2</title>
+<style>
+  :root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+    --bg:#0b1220; --panel:#111a2e; --line:#26334d; --mut:#7c8aa5; --txt:#e6edf7; --acc:#38bdf8; --warn:#fbbf24; }
+  *, *::before, *::after { box-sizing: inherit; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { background: var(--bg); color: var(--txt); font-family: system-ui, Roboto, sans-serif;
+    display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px; user-select: none; touch-action: manipulation; overflow-x: hidden; }
+  .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: min(100%, 420px); }
+  .cell { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; text-align: center; }
+  .lab { font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--mut); }
+  .num { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .num.big { font-size: 2.4rem; color: var(--acc); }
+  .sub { font-size: .7rem; color: var(--mut); min-height: 1em; }
+  #gauge { width: min(88vw, 60vh, 380px); aspect-ratio: 1; }
+  #gauge svg { width: 100%; height: 100%; display: block; }
+  .btns { display: flex; gap: 8px; width: min(100%, 420px); }
+  button, select { flex: 1; border: 1px solid var(--line); border-radius: 12px; padding: 13px 8px; font: 600 .9rem system-ui; background: var(--panel); color: var(--txt); }
+  #startBtn { background: #22c55e; color: #052e16; border: 0; }
+  #startBtn.on { background: #475569; color: #fff; }
+  button:disabled { opacity: .4; }
+  #status { font-size: .75rem; color: var(--mut); text-align: center; min-height: 1.2em; }
+  #status.ok { color: #4ade80; } #status.err { color: #f87171; }
+  #sim { display: none; width: min(100%, 420px); flex-direction: column; gap: 6px; font-size: .75rem; color: var(--mut); }
+  #sim input { width: 100%; }
+  .strip { width: min(100%, 420px); text-align: center; font-size: .8rem; color: var(--mut); }
+</style>
+</head>
+<body>
+  <div style="font-size:.65rem;color:#7c8aa5;letter-spacing:.1em">BIKE INCLINOMETER · v2</div>
+  <div class="row">
+    <div class="cell"><div class="lab">Max left</div><div class="num" id="maxL">0°</div></div>
+    <div class="cell"><div class="lab">Lean</div><div class="num big" id="lean">0.0°</div><div class="sub" id="leanDir">level</div></div>
+    <div class="cell"><div class="lab">Max right</div><div class="num" id="maxR">0°</div></div>
+  </div>
+
+  <div id="gauge">
+    <svg viewBox="0 0 200 200">
+      <defs>
+        <clipPath id="clip"><circle cx="100" cy="100" r="92"/></clipPath>
+        <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e4a7a"/><stop offset="1" stop-color="#2f78b0"/></linearGradient>
+        <linearGradient id="gnd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a6b30"/><stop offset="1" stop-color="#1a2e14"/></linearGradient>
+      </defs>
+      <circle cx="100" cy="100" r="97" fill="#1e293b" stroke="#334155" stroke-width="3"/>
+      <g clip-path="url(#clip)"><g id="horizon">
+        <rect x="-150" y="-150" width="500" height="250" fill="url(#sky)"/>
+        <rect x="-150" y="100" width="500" height="250" fill="url(#gnd)"/>
+        <line x1="-150" y1="100" x2="350" y2="100" stroke="#f1f5f9" stroke-width="2"/>
+        <g stroke="#e2e8f0" stroke-opacity=".6" stroke-width="1" id="ladder"></g>
+      </g></g>
+      <g id="scale" stroke="#e2e8f0" stroke-linecap="round"></g>
+      <g id="ptr"><path d="M100 10 L94 22 L106 22 Z" fill="#fbbf24"/></g>
+      <path d="M100 4 L95 -1 L105 -1 Z" fill="none"/>
+      <!-- bike from behind: fixed to the frame -->
+      <g stroke="#f8fafc" stroke-linecap="round" fill="none">
+        <rect x="95" y="112" width="10" height="40" rx="5" fill="#0f172a" stroke-width="2"/>
+        <line x1="76" y1="104" x2="124" y2="104" stroke-width="3"/>
+        <line x1="100" y1="104" x2="100" y2="126" stroke-width="3"/>
+        <circle cx="100" cy="94" r="7" fill="#38bdf8" stroke="#0284c7" stroke-width="2"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="row" style="grid-template-columns:1fr 1fr 1fr">
+    <div class="cell"><div class="lab">Heading</div><div class="num" id="hdg">--</div><div class="sub" id="hdgDir"></div></div>
+    <div class="cell"><div class="lab">Slope</div><div class="num" id="slope">0.0°</div><div class="sub" id="slopePct">0% grade</div></div>
+    <div class="cell"><div class="lab">Peak reset</div><button id="resetBtn" style="padding:8px;margin-top:2px;width:100%">Clear</button></div>
+  </div>
+
+  <div class="btns">
+    <button id="startBtn">Start</button>
+    <button id="tareBtn" disabled>Zero (bike upright)</button>
+  </div>
+  <div class="btns">
+    <select id="mode" aria-label="Phone mounting">
+      <option value="portrait">Mount: portrait</option>
+      <option value="landscapeL">Mount: landscape (top left)</option>
+      <option value="landscapeR">Mount: landscape (top right)</option>
+    </select>
+    <button id="flipBtn">Flip L/R</button>
+  </div>
+  <div id="status">Mount phone facing you, bike upright, press Start, then Zero.</div>
+  <div id="sim">
+    <label>Simulated lean <input type="range" id="simLean" min="-60" max="60" value="0" step="0.5"></label>
+  </div>
+  <p class="strip">Wake lock on while running. Lean uses the phone's gyro-fused orientation, which holds up better in corners than a raw accelerometer.</p>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var D = Math.PI / 180;
+
+  // Build fixed scale + pitch ladder
+  var scale = $("scale");
+  [0,10,20,30,40,50,60,-10,-20,-30,-40,-50,-60].forEach(function (a) {
+    var len = a === 0 ? 12 : (a % 30 === 0 ? 10 : 6);
+    var l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    l.setAttribute("x1", 100); l.setAttribute("x2", 100); l.setAttribute("y1", 8); l.setAttribute("y2", 8 + len);
+    l.setAttribute("stroke-width", a % 30 === 0 ? 2 : 1.2);
+    if (a === 0) l.setAttribute("stroke", "#fbbf24");
+    l.setAttribute("transform", "rotate(" + a + " 100 100)");
+    scale.appendChild(l);
+  });
+  var ladder = $("ladder");
+  [-30,-20,-10,10,20,30].forEach(function (d) {
+    var y = 100 - d * 1.6;
+    var l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    l.setAttribute("x1", 82); l.setAttribute("x2", 118); l.setAttribute("y1", y); l.setAttribute("y2", y);
+    ladder.appendChild(l);
+  });
+
+  var running = false, hasAbs = false, gotAny = false, flip = false;
+  var raw = { lean: 0, pitch: 0, heading: null };
+  var zero = 0, zeroPitch = 0, lean = 0, pitch = 0, maxL = 0, maxR = 0, wake = null, hdgTimer = null, rafOn = false;
+  var simmed = false;
+
+  function names(d) { return ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"][Math.round(d / 22.5) % 16]; }
+  function norm180(d) { while (d > 180) d -= 360; while (d < -180) d += 360; return d; }
+
+  // Gravity ("up") vector in device frame from W3C alpha/beta/gamma.
+  // Lean = roll in the screen plane, so it works for an upright phone on handlebars
+  // (unlike gamma, which only measures roll for a phone lying flat).
+  function process(e) {
+    if (e.beta == null || e.gamma == null) return;
+    var b = e.beta * D, g = e.gamma * D;
+    var ux = -Math.sin(g) * Math.cos(b), uy = Math.sin(b), uz = Math.cos(g) * Math.cos(b);
+    var mode = $("mode").value, s, r;
+    if (mode === "portrait")       { s = uy;  r = ux;  }
+    else if (mode === "landscapeL"){ s = ux;  r = -uy; }
+    else                           { s = -ux; r = uy;  }
+    var l = Math.atan2(-r, s) / D;          // + = leaning right
+    if (flip) l = -l;
+    raw.lean = l;
+    // slope: how far the phone's back is tilted up/down relative to horizontal
+    raw.pitch = Math.asin(Math.max(-1, Math.min(1, -uz))) / D;
+    if (e.alpha != null && (e.absolute || e.webkitCompassHeading != null)) {
+      var a = e.alpha * D, sb = Math.sin(b), cb = Math.cos(b), sg = Math.sin(g), cg = Math.cos(g);
+      var zx = Math.cos(a) * sg + Math.sin(a) * sb * cg;         // device z axis, world East
+      var zy = Math.sin(a) * sg - Math.cos(a) * sb * cg;         // world North
+      var h = Math.atan2(-zx, -zy) / D;                          // direction the phone's back faces
+      raw.heading = (e.webkitCompassHeading != null && !e.absolute) ? e.webkitCompassHeading : (h + 360) % 360;
+    }
+    gotAny = true;
+    // light low-pass, fast enough for riding
+    lean += (norm180(raw.lean - zero - lean)) * 0.35;
+    pitch += (raw.pitch - zeroPitch - pitch) * 0.25;
+    if (lean > maxR) maxR = lean;
+    if (-lean > maxL) maxL = -lean;
+  }
+
+  function onAbs(e) { if (!running) return; hasAbs = true; process(e); }
+  function onRel(e) { if (!running || hasAbs) return; process(e); }
+
+  function render() {
+    if (!running) { rafOn = false; return; }
+    var L = Math.max(-90, Math.min(90, lean));
+    var P = Math.max(-40, Math.min(40, pitch));   // uphill = horizon drops, downhill = horizon rises
+    $("horizon").setAttribute("transform", "rotate(" + (-L).toFixed(2) + " 100 100) translate(0 " + (P * 1.6).toFixed(2) + ")");
+    $("ptr").setAttribute("transform", "rotate(" + L.toFixed(2) + " 100 100)");
+    $("lean").textContent = Math.abs(L).toFixed(1) + "°";
+    $("leanDir").textContent = Math.abs(L) < 0.5 ? "upright" : (L < 0 ? "left" : "right");
+    $("maxL").textContent = maxL.toFixed(0) + "°";
+    $("maxR").textContent = maxR.toFixed(0) + "°";
+    $("slope").textContent = pitch.toFixed(1) + "°";
+    $("slopePct").textContent = (Math.tan(pitch * D) * 100).toFixed(0) + "% grade";
+    requestAnimationFrame(render);
+  }
+
+  function updateHeading() {
+    if (raw.heading == null) { $("hdg").textContent = "--"; $("hdgDir").textContent = "no compass"; return; }
+    $("hdg").textContent = Math.round(raw.heading) + "°";
+    $("hdgDir").textContent = names(raw.heading);
+  }
+
+  async function keepAwake() {
+    try { if ("wakeLock" in navigator) wake = await navigator.wakeLock.request("screen"); } catch (e) {}
+  }
+  document.addEventListener("visibilitychange", function () { if (running && document.visibilityState === "visible") keepAwake(); });
+
+  function setStatus(t, c) { $("status").textContent = t; $("status").className = c || ""; }
+
+  async function start() {
+    running = true; hasAbs = false; gotAny = false; zero = 0; zeroPitch = 0; lean = 0; pitch = 0;
+    $("startBtn").textContent = "Stop"; $("startBtn").classList.add("on"); $("tareBtn").disabled = false;
+    setStatus("Starting sensors…");
+    keepAwake();
+    try {
+      if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+        var p = await DeviceOrientationEvent.requestPermission();
+        if (p !== "granted") { showSim("Sensor permission denied"); }
+      }
+    } catch (e) {}
+    window.addEventListener("deviceorientationabsolute", onAbs, true);
+    window.addEventListener("deviceorientation", onRel, true);
+    hdgTimer = setInterval(updateHeading, 1000);
+    if (!rafOn) { rafOn = true; requestAnimationFrame(render); }
+    setTimeout(function () {
+      if (running && !gotAny) showSim("No motion sensor data (needs HTTPS + a phone)");
+      else if (running && gotAny) setStatus("Live. Put bike upright on level ground and tap Zero.", "ok");
+    }, 2000);
+  }
+
+  function stop() {
+    running = false;
+    window.removeEventListener("deviceorientationabsolute", onAbs, true);
+    window.removeEventListener("deviceorientation", onRel, true);
+    clearInterval(hdgTimer);
+    if (wake) { try { wake.release(); } catch (e) {} wake = null; }
+    $("startBtn").textContent = "Start"; $("startBtn").classList.remove("on"); $("tareBtn").disabled = true;
+    $("sim").style.display = "none";
+    setStatus("Stopped");
+  }
+
+  function showSim(msg) { $("sim").style.display = "flex"; setStatus(msg + " — simulator below", "err"); simmed = true; }
+
+  $("startBtn").onclick = function () { running ? stop() : start(); };
+  $("tareBtn").onclick = function () { zero = raw.lean; zeroPitch = raw.pitch; pitch = 0; lean = 0; maxL = 0; maxR = 0; setStatus("Zeroed lean and slope to current position", "ok"); };
+  $("resetBtn").onclick = function () { maxL = 0; maxR = 0; };
+  $("flipBtn").onclick = function () { flip = !flip; zero = 0; lean = 0; setStatus("Left/right flipped. Zero again.", "ok"); };
+  $("mode").onchange = function () { zero = 0; lean = 0; setStatus("Mount changed. Zero again with bike upright.", "ok"); };
+  $("simLean").oninput = function () { if (running) { lean = parseFloat(this.value); if (lean > maxR) maxR = lean; if (-lean > maxL) maxL = -lean; } };
+})();
+</script>
+</body>
+</html>
